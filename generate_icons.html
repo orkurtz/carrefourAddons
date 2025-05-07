@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Generate Carrefour Extension Icons</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 20px auto;
+      padding: 20px;
+    }
+    button {
+      padding: 10px 15px;
+      background-color: #f39200;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 10px 0;
+    }
+    .preview {
+      display: flex;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+    .icon-preview {
+      margin: 10px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Carrefour Extension Icon Generator</h1>
+  <p>לחץ על הכפתור למטה כדי לייצר את האייקונים בגדלים השונים:</p>
+  
+  <button id="generateBtn">Generate Icons</button>
+  
+  <div class="preview" id="preview"></div>
+  
+  <script>
+    const svgContent = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- White circle background -->
+  <circle cx="64" cy="64" r="64" fill="white"/>
+  <!-- Orange circle -->
+  <circle cx="64" cy="64" r="62" fill="#f39200"/>
+  <!-- White letter C -->
+  <text x="64" y="64" font-family="Arial, sans-serif" font-size="80" font-weight="bold" text-anchor="middle" dominant-baseline="central" fill="white">C</text>
+</svg>`;
+    
+    const sizes = [16, 48, 128];
+    
+    document.getElementById('generateBtn').addEventListener('click', function() {
+      const preview = document.getElementById('preview');
+      preview.innerHTML = '';
+      
+      sizes.forEach(size => {
+        // Create a container for each icon
+        const container = document.createElement('div');
+        container.className = 'icon-preview';
+        
+        // Create an img element with the SVG data
+        const img = document.createElement('img');
+        const svgBlob = new Blob([svgContent], { type: 'image/svg+xml' });
+        const svgUrl = URL.createObjectURL(svgBlob);
+        img.src = svgUrl;
+        img.width = size;
+        img.height = size;
+        
+        // Create a canvas to convert SVG to PNG
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        
+        // When the image loads, draw it on the canvas
+        img.onload = function() {
+          ctx.drawImage(img, 0, 0, size, size);
+          URL.revokeObjectURL(svgUrl);
+          
+          // Create a download link
+          const link = document.createElement('a');
+          link.href = canvas.toDataURL('image/png');
+          link.download = `icon${size}.png`;
+          link.textContent = `Download icon${size}.png`;
+          link.style.display = 'block';
+          link.style.marginTop = '5px';
+          
+          container.appendChild(img);
+          container.appendChild(document.createElement('br'));
+          container.appendChild(link);
+          preview.appendChild(container);
+        };
+      });
+    });
+  </script>
+</body>
+</html> 
