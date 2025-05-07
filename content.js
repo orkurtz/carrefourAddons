@@ -471,8 +471,51 @@ if (window.location.href.includes('carrefour.co.il')) {
     
     console.log('כותרות הקובץ:', headers);
     
-    // נמצא את האינדקסים של העמודות החשובות
-    const nameIndex = headers.findIndex(h => 
+    // טיפול במקרה שיש כותרות שמכילות פסיקים - פיצול כותרות ומיזוג עמודות
+    // בדיקה אם יש כותרת ארוכה שמכילה פסיקים
+    let fixedHeaders = [...headers];
+    let columnsToMerge = [];
+    
+    for (let i = 0; i < headers.length; i++) {
+      if (headers[i].includes(',')) {
+        // מצאנו כותרת שמכילה פסיקים בתוכה
+        console.log('נמצאה כותרת עם פסיקים:', headers[i]);
+        
+        // פיצול הכותרת לכותרות נפרדות
+        const splitHeaders = headers[i].split(',');
+        
+        // מחליף את הכותרת הנוכחית עם הראשונה מהפיצול
+        fixedHeaders[i] = splitHeaders[0];
+        
+        // מוסיף את שאר הכותרות כעמודות חדשות
+        for (let j = 1; j < splitHeaders.length; j++) {
+          fixedHeaders.push(splitHeaders[j]);
+          
+          // שומר את המיקום של העמודות ששייכות למיזוג
+          columnsToMerge.push(fixedHeaders.length - 1);
+        }
+      }
+    }
+    
+    // עדכון השורות אם היה צורך במיזוג עמודות
+    let fixedRows = productRows;
+    if (columnsToMerge.length > 0) {
+      console.log('מתקן מבנה נתונים - מוסיף עמודות:', columnsToMerge);
+      
+      fixedRows = productRows.map(row => {
+        const newRow = [...row];
+        // מוסיף ערכים ריקים לעמודות החדשות
+        for (let i = 0; i < columnsToMerge.length; i++) {
+          newRow.push('');
+        }
+        return newRow;
+      });
+    }
+    
+    console.log('כותרות מתוקנות:', fixedHeaders);
+    
+    // נמצא את האינדקסים של העמודות החשובות בכותרות המתוקנות
+    const nameIndex = fixedHeaders.findIndex(h => 
       h === 'product_name' || 
       h === 'שם מוצר' || 
       h === 'שם' || 
@@ -481,14 +524,14 @@ if (window.location.href.includes('carrefour.co.il')) {
       h.includes('name')
     );
 
-    const barcodeIndex = headers.findIndex(h => 
+    const barcodeIndex = fixedHeaders.findIndex(h => 
       h === 'barcode' || 
       h === 'ברקוד' || 
       h.includes('ברקוד') ||
       h.includes('barcode')
     );
 
-    const quantityIndex = headers.findIndex(h => 
+    const quantityIndex = fixedHeaders.findIndex(h => 
       h === 'quantity' || 
       h === 'כמות' || 
       h === 'qty' || 
@@ -496,7 +539,7 @@ if (window.location.href.includes('carrefour.co.il')) {
       h.includes('quantity')
     );
 
-    const linkIndex = headers.findIndex(h => 
+    const linkIndex = fixedHeaders.findIndex(h => 
       h === 'product_link' || 
       h === 'קישור מוצר' || 
       h === 'קישור' || 
@@ -506,7 +549,7 @@ if (window.location.href.includes('carrefour.co.il')) {
     );
 
     // חיפוש עמודת מזהה מוצר
-    const productIdIndex = headers.findIndex(h => 
+    const productIdIndex = fixedHeaders.findIndex(h => 
       h === 'productId' ||
       h === 'product_id' ||
       h === 'מזהה מוצר' ||
@@ -514,7 +557,7 @@ if (window.location.href.includes('carrefour.co.il')) {
     );
 
     // חיפוש עמודת מזהה ספק
-    const retailerProductIdIndex = headers.findIndex(h => 
+    const retailerProductIdIndex = fixedHeaders.findIndex(h => 
       h === 'retailerProductId' ||
       h === 'retailer_product_id' ||
       h === 'מזהה ספק' ||
@@ -531,19 +574,19 @@ if (window.location.href.includes('carrefour.co.il')) {
     });
 
     // אם לא מצאנו עמודת שם מוצר, ננסה להשתמש בעמודה הראשונה
-    if (nameIndex === -1 && headers.length > 0) {
-      console.log('לא נמצאה עמודת שם מוצר, משתמש בעמודה הראשונה:', headers[0]);
+    if (nameIndex === -1 && fixedHeaders.length > 0) {
+      console.log('לא נמצאה עמודת שם מוצר, משתמש בעמודה הראשונה:', fixedHeaders[0]);
       nameIndex = 0;
     }
 
     // אם לא מצאנו עמודת כמות, ננסה להשתמש בכל עמודה מספרית
     if (quantityIndex === -1) {
       // מחפש עמודה שיש בה מספרים
-      for (let i = 0; i < headers.length; i++) {
+      for (let i = 0; i < fixedHeaders.length; i++) {
         if (i !== nameIndex && i !== barcodeIndex && i !== linkIndex) {
           // בודק אם בשורה הראשונה יש מספר בעמודה הזו
-          if (productRows.length > 0 && !isNaN(parseFloat(productRows[0][i]))) {
-            console.log('נמצאה עמודה מספרית שיכולה להיות כמות:', headers[i]);
+          if (fixedRows.length > 0 && !isNaN(parseFloat(fixedRows[0][i]))) {
+            console.log('נמצאה עמודה מספרית שיכולה להיות כמות:', fixedHeaders[i]);
             quantityIndex = i;
             break;
           }
@@ -571,15 +614,15 @@ if (window.location.href.includes('carrefour.co.il')) {
     let currentIndex = 0;
     
     function addNextProduct() {
-      if (currentIndex >= productRows.length) {
+      if (currentIndex >= fixedRows.length) {
         // סיימנו להוסיף את כל המוצרים
         progressTitle.textContent = 'הייבוא הושלם בהצלחה';
-        progressStatus.textContent = 'כל המוצרים יובאו לעגלה (' + currentIndex + '/' + productRows.length + ')';
+        progressStatus.textContent = 'כל המוצרים יובאו לעגלה (' + currentIndex + '/' + fixedRows.length + ')';
         closeButton.style.display = 'block';
         return;
       }
       
-      const row = productRows[currentIndex];
+      const row = fixedRows[currentIndex];
       
       // אם השורה ריקה או לא מערך, נדלג עליה
       if (!row || !Array.isArray(row) || row.length === 0) {
@@ -612,7 +655,7 @@ if (window.location.href.includes('carrefour.co.il')) {
         }
       }
       
-      const productLink = linkIndex !== -1 ? row[linkIndex] : '';
+      const productLink = row[linkIndex] || '';
       
       // חילוץ מזהי מוצר
       const productId = productIdIndex !== -1 ? row[productIdIndex] : '';
@@ -636,9 +679,9 @@ if (window.location.href.includes('carrefour.co.il')) {
       });
       
       // עדכון התקדמות
-      const progress = Math.round((currentIndex + 1) / productRows.length * 100);
+      const progress = Math.round((currentIndex + 1) / fixedRows.length * 100);
       progressFill.style.width = progress + '%';
-      progressStatus.textContent = 'מוסיף: ' + productName + ' (' + (currentIndex + 1) + '/' + productRows.length + ')';
+      progressStatus.textContent = 'מוסיף: ' + productName + ' (' + (currentIndex + 1) + '/' + fixedRows.length + ')';
       
       // לוגיקת הוספה לעגלה - סדר העדיפויות:
       // 1. מזהה מוצר ישיר (Product ID)
@@ -652,8 +695,8 @@ if (window.location.href.includes('carrefour.co.il')) {
           currentIndex++;
           setTimeout(addNextProduct, 500);
         });
-      } else if (productLink) {
-        // יש לנו קישור למוצר, נשתמש בו
+      } else if (productLink && productLink.includes('carrefour.co.il')) {
+        // יש לנו קישור למוצר, נשתמש בו (רק אם נראה כמו קישור תקין)
         addProductByLink(productLink, quantity, function(success) {
           currentIndex++;
           setTimeout(addNextProduct, 500);
@@ -681,44 +724,151 @@ if (window.location.href.includes('carrefour.co.il')) {
   function addProductByLink(productLink, quantity, callback) {
     console.log('מוסיף מוצר לפי קישור:', productLink);
     
-    // קבל את ה-token האחרון ששמור באחסון המקומי
-    chrome.storage.local.get(['carrefour_token'], function(data) {
-      if (!data.carrefour_token) {
-        console.error('לא נמצא token בשמירה המקומית');
-        callback(false);
-        return;
-      }
-      
-      // מקבל מזהה מוצר מהקישור
-      const productId = extractProductIdFromLink(productLink);
-      if (!productId) {
-        console.error('לא הצלחנו לחלץ מזהה מוצר מהקישור:', productLink);
-        callback(false);
-        return;
-      }
-      
-      // מבצע קריאה לממשק ה-API להוספת מוצר
-      fetch(`https://www.carrefour.co.il/api/v1/cart/item?product_id=${productId}&quantity=${quantity}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Auth-Token': data.carrefour_token
+    // בקשת מידע מסקריפט הרקע - בדיוק כמו בפונקציית exportCartToCsv
+    // שימוש בפרומיס כדי לאפשר async/await בדיוק כמו בייצוא
+    (async function() {
+      try {
+        // מקבל מזהה מוצר מהקישור
+        const productId = extractProductIdFromLink(productLink);
+        if (!productId) {
+          console.error('לא הצלחנו לחלץ מזהה מוצר מהקישור:', productLink);
+          callback(false);
+          return;
         }
-      })
-      .then(response => {
-        if (response.ok) {
-          console.log('המוצר נוסף בהצלחה:', productId);
-          callback(true);
-        } else {
-          console.error('שגיאה בהוספת המוצר:', response.status);
+        
+        let data;
+        try {
+          data = await new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+              reject(new Error('פסק זמן בבקשת נתוני טוקן'));
+            }, 5000); // 5 שניות לטיים-אאוט
+            
+            chrome.runtime.sendMessage({action: "getCartData"}, response => {
+              clearTimeout(timeoutId);
+              if (chrome.runtime.lastError) {
+                reject(new Error('תקלה בתקשורת עם סקריפט הרקע: ' + chrome.runtime.lastError.message));
+              } else if (!response) {
+                reject(new Error('לא התקבלה תשובה מסקריפט הרקע'));
+              } else {
+                resolve(response);
+              }
+            });
+          });
+        } catch (err) {
+          console.error('שגיאה בקבלת נתוני טוקן:', err);
+          callback(false);
+          return;
+        }
+        
+        console.log('התקבלה תשובה מסקריפט הרקע:', {
+          hasAuthToken: !!data.carrefour_auth_token,
+          hasCartDetails: !!data.carrefour_cart_details,
+          hasXAuthToken: !!data.carrefour_token
+        });
+        
+        if (!data) {
+          console.error('לא התקבלו נתונים משירות הרקע');
+          callback(false);
+          return;
+        }
+        
+        if (!data.carrefour_auth_token || !data.carrefour_cart_details) {
+          // נבדוק אם יש לנו X-Auth-Token - בדיוק כמו בייצוא
+          if (!data.carrefour_token) {
+            console.error('לא נמצאו נתוני טוקן אימות');
+            callback(false);
+            return;
+          }
+          
+          // אם יש לנו רק X-Auth-Token, ננסה להשתמש בו
+          console.log('נמצא רק טוקן X-Auth, מנסה להשתמש בו ישירות');
+          
+          // מבצע קריאה ישירה לממשק ה-API להוספת מוצר עם X-Auth-Token
+          try {
+            const response = await fetch(`https://www.carrefour.co.il/api/v1/cart/item?product_id=${productId}&quantity=${quantity}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Auth-Token': data.carrefour_token
+              }
+            });
+            
+            if (response.ok) {
+              console.log('המוצר נוסף בהצלחה לפי קישור:', productLink);
+              callback(true);
+            } else {
+              console.error('שגיאה בהוספת המוצר לפי קישור:', response.status);
+              
+              // ננסה לחפש את המוצר לפי שם כגיבוי - אם היה לנו שם
+              console.error('כל הניסיונות להוספת המוצר נכשלו');
+              callback(false);
+            }
+          } catch (error) {
+            console.error('שגיאה בבקשת הוספת המוצר:', error);
+            callback(false);
+          }
+          
+          return;
+        }
+        
+        // אם יש לנו Bearer token וגם נתוני עגלה, ננסה להשתמש בהם (כמו בייצוא)
+        const authToken = data.carrefour_auth_token;
+        const cartDetails = data.carrefour_cart_details;
+        
+        console.log('נמצאו נתוני טוקן מלאים, מנסה להוסיף מוצר דרך API הראשי');
+        
+        // קודם ננסה להוסיף מוצר דרך ה-API הראשי (כמו בייצוא)
+        try {
+          // הבקשה הותאמה להוספת מוצר, לא תואמת בדיוק את הייצוא כי זו פעולה שונה
+          const cartApiUrl = `https://www.carrefour.co.il/api/v1/cart/item?product_id=${productId}&quantity=${quantity}`;
+          
+          const response = await fetch(cartApiUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authToken}`
+            }
+          });
+          
+          if (response.ok) {
+            console.log('המוצר נוסף בהצלחה עם Bearer token:', productId);
+            callback(true);
+          } else {
+            console.error('שגיאה בהוספת המוצר עם Bearer token:', response.status);
+            
+            // ננסה שוב עם X-Auth-Token אם קיים
+            if (data.carrefour_token) {
+              console.log('מנסה להוסיף עם X-Auth-Token כגיבוי');
+              
+              const xAuthResponse = await fetch(`https://www.carrefour.co.il/api/v1/cart/item?product_id=${productId}&quantity=${quantity}`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Auth-Token': data.carrefour_token
+                }
+              });
+              
+              if (xAuthResponse.ok) {
+                console.log('המוצר נוסף בהצלחה עם X-Auth-Token:', productId);
+                callback(true);
+              } else {
+                console.error('כל הניסיונות להוספת המוצר נכשלו');
+                callback(false);
+              }
+            } else {
+              console.error('אין X-Auth-Token לגיבוי, נכשלו כל הניסיונות להוספת המוצר');
+              callback(false);
+            }
+          }
+        } catch (error) {
+          console.error('שגיאה בבקשת הוספת המוצר:', error);
           callback(false);
         }
-      })
-      .catch(error => {
-        console.error('שגיאה בבקשת הוספת המוצר:', error);
+      } catch (error) {
+        console.error('שגיאה כללית בתהליך הוספת המוצר:', error);
         callback(false);
-      });
-    });
+      }
+    })();
   }
 
   // פונקציה שמוסיפה מוצר לעגלה באמצעות ברקוד
@@ -801,39 +951,159 @@ if (window.location.href.includes('carrefour.co.il')) {
   function addProductById(productId, quantity, callback) {
     console.log('מוסיף מוצר לפי מזהה מוצר (Product ID):', productId);
     
-    // קבל את ה-token האחרון ששמור באחסון המקומי
-    chrome.storage.local.get(['carrefour_token'], function(data) {
-      if (!data.carrefour_token) {
-        console.error('לא נמצא token בשמירה המקומית');
+    // בקשת מידע מסקריפט הרקע - בדיוק כמו בפונקציית exportCartToCsv
+    // שימוש בפרומיס כדי לאפשר async/await בדיוק כמו בייצוא
+    (async function() {
+      try {
+        let data;
+        try {
+          data = await new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+              reject(new Error('פסק זמן בבקשת נתוני טוקן'));
+            }, 5000); // 5 שניות לטיים-אאוט
+            
+            chrome.runtime.sendMessage({action: "getCartData"}, response => {
+              clearTimeout(timeoutId);
+              if (chrome.runtime.lastError) {
+                reject(new Error('תקלה בתקשורת עם סקריפט הרקע: ' + chrome.runtime.lastError.message));
+              } else if (!response) {
+                reject(new Error('לא התקבלה תשובה מסקריפט הרקע'));
+              } else {
+                resolve(response);
+              }
+            });
+          });
+        } catch (err) {
+          console.error('שגיאה בקבלת נתוני טוקן:', err);
+          callback(false);
+          return;
+        }
+        
+        console.log('התקבלה תשובה מסקריפט הרקע:', {
+          hasAuthToken: !!data.carrefour_auth_token,
+          hasCartDetails: !!data.carrefour_cart_details,
+          hasXAuthToken: !!data.carrefour_token
+        });
+        
+        if (!data) {
+          console.error('לא התקבלו נתונים משירות הרקע');
+          callback(false);
+          return;
+        }
+        
+        if (!data.carrefour_auth_token || !data.carrefour_cart_details) {
+          // נבדוק אם יש לנו X-Auth-Token - בדיוק כמו בייצוא
+          if (!data.carrefour_token) {
+            console.error('לא נמצאו נתוני טוקן אימות');
+            callback(false);
+            return;
+          }
+          
+          // אם יש לנו רק X-Auth-Token, ננסה להשתמש בו
+          console.log('נמצא רק טוקן X-Auth, מנסה להשתמש בו ישירות');
+          
+          // מבצע קריאה ישירה לממשק ה-API להוספת מוצר עם X-Auth-Token
+          try {
+            const response = await fetch(`https://www.carrefour.co.il/api/v1/cart/item?product_id=${productId}&quantity=${quantity}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Auth-Token': data.carrefour_token
+              }
+            });
+            
+            if (response.ok) {
+              console.log('המוצר נוסף בהצלחה לפי Product ID:', productId);
+              callback(true);
+            } else {
+              console.error('שגיאה בהוספת המוצר לפי Product ID:', response.status);
+              
+              // ננסה דרך קישור כמנגנון גיבוי
+              const productLink = `https://www.carrefour.co.il/product/${productId}`;
+              console.log('מנסה להוסיף לפי קישור:', productLink);
+              
+              const linkResponse = await fetch(`https://www.carrefour.co.il/api/v1/cart/item?product_id=${productId}&quantity=${quantity}`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Auth-Token': data.carrefour_token
+                }
+              });
+              
+              if (linkResponse.ok) {
+                console.log('המוצר נוסף בהצלחה דרך קישור גיבוי:', productId);
+                callback(true);
+              } else {
+                console.error('כל הניסיונות להוספת המוצר נכשלו');
+                callback(false);
+              }
+            }
+          } catch (error) {
+            console.error('שגיאה בבקשת הוספת המוצר:', error);
+            callback(false);
+          }
+          
+          return;
+        }
+        
+        // אם יש לנו Bearer token וגם נתוני עגלה, ננסה להשתמש בהם (כמו בייצוא)
+        const authToken = data.carrefour_auth_token;
+        const cartDetails = data.carrefour_cart_details;
+        
+        console.log('נמצאו נתוני טוקן מלאים, מנסה להוסיף מוצר דרך API הראשי');
+        
+        // קודם ננסה להוסיף מוצר דרך ה-API הראשי (כמו בייצוא)
+        try {
+          // הבקשה הותאמה להוספת מוצר, לא תואמת בדיוק את הייצוא כי זו פעולה שונה
+          const cartApiUrl = `https://www.carrefour.co.il/api/v1/cart/item?product_id=${productId}&quantity=${quantity}`;
+          
+          const response = await fetch(cartApiUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authToken}`
+            }
+          });
+          
+          if (response.ok) {
+            console.log('המוצר נוסף בהצלחה עם Bearer token:', productId);
+            callback(true);
+          } else {
+            console.error('שגיאה בהוספת המוצר עם Bearer token:', response.status);
+            
+            // ננסה שוב עם X-Auth-Token אם קיים
+            if (data.carrefour_token) {
+              console.log('מנסה להוסיף עם X-Auth-Token כגיבוי');
+              
+              const xAuthResponse = await fetch(`https://www.carrefour.co.il/api/v1/cart/item?product_id=${productId}&quantity=${quantity}`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Auth-Token': data.carrefour_token
+                }
+              });
+              
+              if (xAuthResponse.ok) {
+                console.log('המוצר נוסף בהצלחה עם X-Auth-Token:', productId);
+                callback(true);
+              } else {
+                console.error('כל הניסיונות להוספת המוצר נכשלו');
+                callback(false);
+              }
+            } else {
+              console.error('אין X-Auth-Token לגיבוי, נכשלו כל הניסיונות להוספת המוצר');
+              callback(false);
+            }
+          }
+        } catch (error) {
+          console.error('שגיאה בבקשת הוספת המוצר:', error);
+          callback(false);
+        }
+      } catch (error) {
+        console.error('שגיאה כללית בתהליך הוספת המוצר:', error);
         callback(false);
-        return;
       }
-      
-      // מבצע קריאה ישירה לממשק ה-API להוספת מוצר
-      fetch(`https://www.carrefour.co.il/api/v1/cart/item?product_id=${productId}&quantity=${quantity}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Auth-Token': data.carrefour_token
-        }
-      })
-      .then(response => {
-        if (response.ok) {
-          console.log('המוצר נוסף בהצלחה לפי Product ID:', productId);
-          callback(true);
-        } else {
-          console.error('שגיאה בהוספת המוצר לפי Product ID:', response.status);
-          // אם יש שגיאה, ננסה להמיר את ה-Product ID לקישור ולנסות שוב
-          const productLink = `https://www.carrefour.co.il/product/${productId}`;
-          console.log('מנסה להוסיף לפי קישור:', productLink);
-          addProductByLink(productLink, quantity, callback);
-        }
-      })
-      .catch(error => {
-        console.error('שגיאה בבקשת הוספת המוצר לפי Product ID:', error);
-        callback(false);
-      });
-    });
+    })();
   }
   
   // מחכה שהדף יסיים לטעון ואז מוסיף את הכפתור
