@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "Carrefour Cart CSV Exporter & Importer",
+  "version": "2.0",
+  "description": "ייצוא וייבוא עגלת הקניות של Carrefour לקובץ CSV בלחיצה אחת",
+  "privacy_policy": "PRIVACY_POLICY.md",
+  "permissions": [
+    "webRequest",
+    "storage",
+    "activeTab",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.carrefour.co.il/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.carrefour.co.il/*"],
+      "js": ["dist/content-bundle.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "images/careefour-CSV-import-export-icon.png",
+      "48": "images/careefour-CSV-import-export-icon.png",
+      "128": "images/careefour-CSV-import-export-icon.png"
+    }
+  },
+  "icons": {
+    "16": "images/careefour-CSV-import-export-icon.png",
+    "48": "images/careefour-CSV-import-export-icon.png",
+    "128": "images/careefour-CSV-import-export-icon.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["images/*", "dist/*"],
+      "matches": ["https://www.carrefour.co.il/*"]
+    }
+  ]
+} 
