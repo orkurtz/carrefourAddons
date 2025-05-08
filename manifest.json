@@ -3,6 +3,7 @@
   "name": "Carrefour Cart CSV Exporter & Importer",
   "version": "1.2",
   "description": "ייצוא וייבוא עגלת הקניות של Carrefour לקובץ CSV בלחיצה אחת",
+  "privacy_policy": "PRIVACY_POLICY.md",
   "permissions": [
     "webRequest",
     "storage",
