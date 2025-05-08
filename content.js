@@ -89,11 +89,12 @@ if (window.location.href.includes('carrefour.co.il')) {
       }
       else if (request.action === "importCart") {
         console.log('content.js: התקבלה בקשה לייבוא עגלה מהחלון הקופץ', 
-          request.data ? `(${request.data.length} פריטים)` : '(ללא נתונים)');
+          request.data ? `(${request.data.length} פריטים)` : '(ללא נתונים)',
+          'מצב:', request.mode || 'replace');
         debugElement.textContent += ' - מתחיל ייבוא';
         
         if (request.data && Array.isArray(request.data) && request.data.length > 1) {
-          importCartFromCsv(request.data);
+          importCartFromCsv(request.data, request.mode || 'replace');
           sendResponse({status: 'started'});
         } else {
           console.error('content.js: נתוני CSV לא תקינים:', request.data);
@@ -115,7 +116,7 @@ if (window.location.href.includes('carrefour.co.il')) {
   });
   
   // בדיקה האם יש פעולה ממתינה לביצוע (לאחר מעבר לדף אחר)
-  chrome.storage.local.get(['carrefour_pending_action', 'carrefour_csv_import_data'], function(data) {
+  chrome.storage.local.get(['carrefour_pending_action', 'carrefour_csv_import_data', 'carrefour_csv_import_mode'], function(data) {
     if (data.carrefour_pending_action === 'export' && window.location.href.includes('/cart')) {
       console.log('נמצאה פעולת ייצוא ממתינה, מבצע');
       // נקה את הפעולה הממתינה
@@ -127,12 +128,12 @@ if (window.location.href.includes('carrefour.co.il')) {
       console.log('content.js: נמצאו נתוני ייבוא מאוחסנים:', data.carrefour_csv_import_data.length);
       // יש לנו נתונים מאוחסנים, נתחיל את הייבוא אוטומטית
       if (confirm('נמצאו נתוני ייבוא CSV שטרם יובאו. האם להתחיל בייבוא כעת?')) {
-        importCartFromCsv(data.carrefour_csv_import_data);
+        importCartFromCsv(data.carrefour_csv_import_data, data.carrefour_csv_import_mode || 'replace');
         // נקה את הנתונים המאוחסנים
-        chrome.storage.local.remove(['carrefour_csv_import_data']);
+        chrome.storage.local.remove(['carrefour_csv_import_data', 'carrefour_csv_import_mode']);
       } else {
         // נקה את הנתונים המאוחסנים
-        chrome.storage.local.remove(['carrefour_csv_import_data']);
+        chrome.storage.local.remove(['carrefour_csv_import_data', 'carrefour_csv_import_mode']);
       }
     }
   });
@@ -429,8 +430,8 @@ if (window.location.href.includes('carrefour.co.il')) {
   }
   
   // פונקציה לייבוא מוצרים מקובץ CSV לעגלה
-  async function importCartFromCsv(csvData) {
-    console.log('מתחיל בייבוא מוצרים מקובץ CSV', csvData.length);
+  async function importCartFromCsv(csvData, mode = 'replace') {
+    console.log('מתחיל בייבוא מוצרים מקובץ CSV', csvData.length, 'במצב:', mode);
     
     // יוצר דיאלוג התקדמות
     const progressModal = document.createElement('div');
@@ -448,7 +449,7 @@ if (window.location.href.includes('carrefour.co.il')) {
     progressModal.style.direction = 'rtl';
     
     const progressTitle = document.createElement('h3');
-    progressTitle.textContent = 'מייבא מוצרים לעגלה...';
+    progressTitle.textContent = mode === 'replace' ? 'מייבא מוצרים לעגלה (החלפה)...' : 'מוסיף מוצרים לעגלה...';
     progressTitle.style.margin = '0 0 15px 0';
     progressTitle.style.color = '#333';
     
@@ -492,7 +493,117 @@ if (window.location.href.includes('carrefour.co.il')) {
     
     document.body.appendChild(progressModal);
     
-    // הכנת נתוני ה-CSV לעיבוד
+    // קבלת נתוני עגלה ונתוני אימות
+    let cartData;
+    try {
+      progressStatus.textContent = 'מקבל נתוני עגלה נוכחית...';
+      console.log('שלב 1: מקבל נתוני עגלה נוכחית');
+      
+      // קבלת נתוני עגלה מסקריפט הרקע
+      cartData = await new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error('פסק זמן בבקשת נתוני טוקן'));
+        }, 5000); // 5 שניות לטיים-אאוט
+        
+        chrome.runtime.sendMessage({action: "getCartData"}, response => {
+          clearTimeout(timeoutId);
+          if (chrome.runtime.lastError) {
+            reject(new Error('תקלה בתקשורת עם סקריפט הרקע: ' + chrome.runtime.lastError.message));
+          } else if (!response) {
+            reject(new Error('לא התקבלה תשובה מסקריפט הרקע'));
+          } else {
+            resolve(response);
+          }
+        });
+      });
+      
+      if (!cartData) {
+        throw new Error('לא התקבלו נתוני עגלה');
+      }
+      
+      console.log('התקבלה תשובה מסקריפט הרקע:', {
+        hasAuthToken: !!cartData.carrefour_auth_token,
+        hasCartDetails: !!cartData.carrefour_cart_details,
+        hasXAuthToken: !!cartData.carrefour_token
+      });
+      
+    } catch (error) {
+      console.error('שגיאה בקבלת נתוני עגלה:', error);
+      progressStatus.textContent = 'שגיאה בקבלת נתוני עגלה: ' + error.message;
+      progressTitle.textContent = 'שגיאה בייבוא';
+      progressFill.style.backgroundColor = 'red';
+      closeButton.style.display = 'block';
+      return;
+    }
+    
+    // שלב 2: טיפול בעגלה קיימת בהתאם למצב היבוא
+    let existingCartItems = [];
+    
+    try {
+      // אם במצב החלפה, נקבל את תוכן העגלה ונרוקן אותה לפני הוספת פריטים חדשים
+      if (mode === 'replace') {
+        progressStatus.textContent = 'מכין את העגלה להחלפה...';
+        console.log('שלב 2: מכין את העגלה להחלפה (מצב replace)');
+        
+        // קבלת הפריטים הקיימים בעגלה
+        existingCartItems = await getExistingCartItems(cartData);
+        
+        // אם יש פריטים בעגלה, נרוקן אותה
+        if (existingCartItems.length > 0) {
+          progressStatus.textContent = `מרוקן את העגלה הקיימת (${existingCartItems.length} פריטים)...`;
+          console.log('מרוקן את העגלה הקיימת לפני החלפה:', existingCartItems.length, 'פריטים');
+          console.log('פרטי הפריטים להסרה:', existingCartItems.map(item => `${item.name} (ID: ${item.retailerProductId}, כמות: ${item.quantity})`));
+          
+          // וידוא שהנתונים מועברים כראוי לפונקציית clearCart
+          console.log('מעביר נתוני טוקן לריקון העגלה:', {
+            hasAuthToken: !!cartData.carrefour_auth_token,
+            hasCartDetails: !!cartData.carrefour_cart_details
+          });
+          
+          const clearSuccess = await clearCart(cartData, existingCartItems);
+          if (clearSuccess) {
+            console.log('העגלה רוקנה בהצלחה');
+            progressStatus.textContent = 'העגלה הקיימת רוקנה בהצלחה';
+            // איפוס רשימת הפריטים הקיימים
+            existingCartItems = [];
+            
+            // המתנה קצרה אחרי ריקון העגלה לפני תחילת הוספת המוצרים
+            console.log('ממתין לסיום ריקון העגלה לפני הוספת פריטים חדשים...');
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            console.log('סיום המתנה, ממשיך להוספת פריטים חדשים');
+          } else {
+            console.error('שגיאה בריקון העגלה');
+            progressStatus.textContent = 'שגיאה בריקון העגלה - ממשיך ביבוא';
+          }
+        } else {
+          console.log('העגלה הנוכחית ריקה, אין צורך בריקון');
+          progressStatus.textContent = 'העגלה הנוכחית ריקה';
+        }
+      } else if (mode === 'add') {
+        progressStatus.textContent = 'מכין את העגלה להוספת פריטים...';
+        console.log('שלב 2: מכין את העגלה להוספת פריטים (מצב add)');
+        
+        // קבלת הפריטים הקיימים בעגלה
+        existingCartItems = await getExistingCartItems(cartData);
+        
+        if (existingCartItems.length > 0) {
+          console.log(`נמצאו ${existingCartItems.length} מוצרים קיימים בעגלה שנשקול לעדכן כמויות`);
+          progressStatus.textContent = `נמצאו ${existingCartItems.length} מוצרים בעגלה הקיימת`;
+        } else {
+          console.log('העגלה הנוכחית ריקה, אין מוצרים קיימים לעדכון כמויות');
+          progressStatus.textContent = 'העגלה הנוכחית ריקה';
+        }
+      }
+    } catch (error) {
+      console.error('שגיאה בטיפול בעגלה הנוכחית:', error);
+      progressStatus.textContent = 'שגיאה בטיפול בעגלה הנוכחית - ממשיך ביבוא';
+      // אם הייתה שגיאה בריקון העגלה, ננסה להמשיך לייבא תוך סיכון שפריטים קיימים לא יימחקו
+    }
+    
+    // שלב 3: הכנת נתוני ה-CSV לעיבוד
+    progressStatus.textContent = 'מכין נתוני CSV לייבוא...';
+    console.log('שלב 3: מכין נתוני CSV לייבוא');
+    
     // שורה ראשונה מכילה כותרות
     const headers = csvData[0];
     const productRows = csvData.slice(1);
@@ -541,6 +652,9 @@ if (window.location.href.includes('carrefour.co.il')) {
     }
     
     console.log('כותרות מתוקנות:', fixedHeaders);
+    
+    // שלב 4: מציאת אינדקסים של עמודות חשובות
+    console.log('שלב 4: מחפש אינדקסים של עמודות חשובות');
     
     // נמצא את האינדקסים של העמודות החשובות בכותרות המתוקנות
     const nameIndex = fixedHeaders.findIndex(h => 
@@ -628,24 +742,26 @@ if (window.location.href.includes('carrefour.co.il')) {
       progressTitle.textContent = 'שגיאה בייבוא';
       progressFill.style.backgroundColor = 'red';
       closeButton.style.display = 'block';
-      console.error('לא נמצאה עמודת שם מוצר בקובץ ה-CSV');
       return;
     }
 
-    if (quantityIndex === -1) {
-      // במקרה שלא נמצאה עמודת כמות, נשתמש בכמות 1 לכל המוצרים
-      console.warn('לא נמצאה עמודת כמות, משתמש בכמות ברירת מחדל של 1');
-      progressStatus.textContent = 'אזהרה: לא נמצאה עמודת כמות, משתמש בכמות 1';
-    }
-    
+    // שלב 5: מוסיף את המוצרים אחד אחד
+    console.log('שלב 5: מתחיל להוסיף מוצרים מה-CSV לעגלה');
+    progressStatus.textContent = 'מתחיל בהוספת מוצרים לעגלה...';
+
     // לולאה שמוסיפה את המוצרים אחד אחרי השני
     let currentIndex = 0;
+    let skippedItems = 0;
     
     function addNextProduct() {
       if (currentIndex >= fixedRows.length) {
         // סיימנו להוסיף את כל המוצרים
         progressTitle.textContent = 'הייבוא הושלם בהצלחה';
-        progressStatus.textContent = 'כל המוצרים יובאו לעגלה (' + currentIndex + '/' + fixedRows.length + ')';
+        if (mode === 'add' && skippedItems > 0) {
+          progressStatus.textContent = `הוספו ${currentIndex - skippedItems} מוצרים לעגלה, דולגו ${skippedItems} מוצרים שכבר קיימים`;
+        } else {
+          progressStatus.textContent = 'כל המוצרים יובאו לעגלה (' + currentIndex + '/' + fixedRows.length + ')';
+        }
         closeButton.style.display = 'block';
         return;
       }
@@ -697,19 +813,95 @@ if (window.location.href.includes('carrefour.co.il')) {
         return;
       }
       
+      let originalQuantity = quantity; // שמירת הכמות המקורית מה-CSV
+      let existingItem = null;
+      
+      // אם במצב הוספה (add), בדוק אם המוצר כבר קיים בעגלה
+      if (mode === 'add' && existingCartItems.length > 0) {
+        console.log(`בודק אם המוצר "${productName}" כבר קיים בעגלה...`);
+        
+        // לוגיקת החיפוש שופרה - נבדוק לפי retailerProductId, productId, ושם
+        let existingItem = null;
+        
+        // חיפוש לפי מזהה ספק
+        if (retailerProductId) {
+          console.log(`מחפש מוצר קיים לפי retailerProductId: ${retailerProductId}`);
+          existingItem = existingCartItems.find(item => 
+            item.retailerProductId === retailerProductId || 
+            item.retailerProductId === String(retailerProductId) || 
+            String(item.retailerProductId) === retailerProductId);
+          
+          if (existingItem) {
+            console.log(`נמצא מוצר קיים בעגלה לפי retailerProductId ${retailerProductId}: ${existingItem.name} (כמות: ${existingItem.quantity})`);
+          }
+        }
+        
+        // חיפוש לפי מזהה מוצר אם לא נמצא לפי מזהה ספק
+        if (!existingItem && productId) {
+          console.log(`מחפש מוצר קיים לפי productId: ${productId}`);
+          existingItem = existingCartItems.find(item => 
+            item.productId === productId || 
+            item.productId === String(productId) || 
+            String(item.productId) === productId);
+          
+          if (existingItem) {
+            console.log(`נמצא מוצר קיים בעגלה לפי productId ${productId}: ${existingItem.name} (כמות: ${existingItem.quantity})`);
+          }
+        }
+        
+        // חיפוש לפי שם מוצר בדיוק אם לא נמצא לפי מזהים
+        if (!existingItem && productName) {
+          console.log(`מחפש מוצר קיים לפי שם מדויק: "${productName}"`);
+          existingItem = existingCartItems.find(item => 
+            item.name === productName);
+          
+          if (existingItem) {
+            console.log(`נמצא מוצר קיים בעגלה לפי שם מדויק: ${existingItem.name} (כמות: ${existingItem.quantity})`);
+          }
+        }
+        
+        if (existingItem) {
+          // המוצר כבר קיים בעגלה - במצב הוספה, נוסיף את הכמות החדשה לכמות הקיימת
+          console.log(`מוצר "${productName}" כבר קיים בעגלה:`, 
+                    'מזהה:', retailerProductId || productId, 
+                    'כמות קיימת:', existingItem.quantity, 
+                    'כמות להוספה:', originalQuantity);
+          
+          // חישוב הכמות המעודכנת: הכמות הקיימת + הכמות החדשה
+          const updatedQuantity = existingItem.quantity + originalQuantity;
+          progressStatus.textContent = `מעדכן כמות: ${productName} (${existingItem.quantity} + ${originalQuantity} = ${updatedQuantity})`;
+          console.log(`מעדכן כמות ל-${updatedQuantity} (${existingItem.quantity} + ${originalQuantity})`);
+          
+          // העברת הכמות המעודכנת
+          quantity = updatedQuantity;
+        } else {
+          console.log(`המוצר "${productName}" אינו קיים בעגלה. מוסיף כמוצר חדש (כמות: ${quantity}).`);
+        }
+      } else if (mode === 'replace') {
+        console.log(`מוסיף מוצר חדש במצב החלפה: "${productName}" (כמות: ${quantity})`);
+      }
+      
       console.log('מוסיף מוצר:', { 
         productName, 
         productId, 
         retailerProductId, 
         barcode, 
-        quantity, 
+        quantity,
+        existingInCart: existingItem ? 'כן' : 'לא',
+        originalQuantity,
+        finalQuantity: quantity, 
         productLink 
       });
       
       // עדכון התקדמות
       const progress = Math.round((currentIndex + 1) / fixedRows.length * 100);
       progressFill.style.width = progress + '%';
-      progressStatus.textContent = 'מוסיף: ' + productName + ' (' + (currentIndex + 1) + '/' + fixedRows.length + ')';
+      
+      if (existingItem) {
+        progressStatus.textContent = `מעדכן: ${productName} (${existingItem.quantity} + ${originalQuantity} = ${quantity}) - ${currentIndex + 1}/${fixedRows.length}`;
+      } else {
+        progressStatus.textContent = `מוסיף: ${productName} (כמות: ${quantity}) - ${currentIndex + 1}/${fixedRows.length}`;
+      }
       
       // לוגיקת הוספה לעגלה - סדר העדיפויות:
       // 1. retailerProductId - מזהה הספק של המוצר (עדיפות ראשונה)
@@ -720,31 +912,76 @@ if (window.location.href.includes('carrefour.co.il')) {
       
       if (retailerProductId) {
         // יש לנו retailerProductId ישיר, נשתמש בו - זה המזהה הנכון להוספה!
+        console.log(`מוסיף לעגלה לפי retailerProductId: ${retailerProductId}, כמות: ${quantity}`);
         addProductById(retailerProductId, quantity, function(success) {
+          if (success) {
+            console.log(`המוצר "${productName}" נוסף בהצלחה לעגלה עם כמות ${quantity}`);
+            if (existingItem) {
+              console.log(`עדכון הושלם: מכמות ${existingItem.quantity} לכמות ${quantity}`);
+            }
+          } else {
+            console.error(`שגיאה בהוספת/עדכון המוצר "${productName}" (retailerProductId: ${retailerProductId})`);
+          }
           currentIndex++;
           setTimeout(addNextProduct, 500);
         });
       } else if (productId) {
         // יש לנו מזהה מוצר אחר, נשתמש בו
+        console.log(`מוסיף לעגלה לפי productId: ${productId}, כמות: ${quantity}`);
         addProductById(productId, quantity, function(success) {
+          if (success) {
+            console.log(`המוצר "${productName}" נוסף בהצלחה לעגלה עם כמות ${quantity}`);
+            if (existingItem) {
+              console.log(`עדכון הושלם: מכמות ${existingItem.quantity} לכמות ${quantity}`);
+            }
+          } else {
+            console.error(`שגיאה בהוספת/עדכון המוצר "${productName}" (productId: ${productId})`);
+          }
           currentIndex++;
           setTimeout(addNextProduct, 500);
         });
       } else if (productLink && productLink.includes('carrefour.co.il')) {
         // יש לנו קישור למוצר, נשתמש בו (רק אם נראה כמו קישור תקין)
+        console.log(`מוסיף לעגלה לפי קישור: ${productLink}, כמות: ${quantity}`);
         addProductByLink(productLink, quantity, function(success) {
+          if (success) {
+            console.log(`המוצר "${productName}" נוסף בהצלחה לעגלה דרך קישור`);
+            if (existingItem) {
+              console.log(`עדכון הושלם: מכמות ${existingItem.quantity} לכמות ${quantity}`);
+            }
+          } else {
+            console.error(`שגיאה בהוספת/עדכון המוצר "${productName}" דרך קישור`);
+          }
           currentIndex++;
           setTimeout(addNextProduct, 500);
         });
       } else if (barcode) {
         // יש לנו ברקוד, ננסה להשתמש בו
+        console.log(`מוסיף לעגלה לפי ברקוד: ${barcode}, כמות: ${quantity}`);
         addProductByBarcode(barcode, quantity, function(success) {
+          if (success) {
+            console.log(`המוצר "${productName}" נוסף בהצלחה לעגלה דרך ברקוד`);
+            if (existingItem) {
+              console.log(`עדכון הושלם: מכמות ${existingItem.quantity} לכמות ${quantity}`);
+            }
+          } else {
+            console.error(`שגיאה בהוספת/עדכון המוצר "${productName}" דרך ברקוד`);
+          }
           currentIndex++;
           setTimeout(addNextProduct, 500);
         });
       } else {
         // יש לנו רק שם, ננסה לחפש את המוצר
+        console.log(`מוסיף לעגלה לפי שם: ${productName}, כמות: ${quantity}`);
         addProductByName(productName, quantity, function(success) {
+          if (success) {
+            console.log(`המוצר "${productName}" נוסף בהצלחה לעגלה לפי שם`);
+            if (existingItem) {
+              console.log(`עדכון הושלם: מכמות ${existingItem.quantity} לכמות ${quantity}`);
+            }
+          } else {
+            console.error(`שגיאה בהוספת/עדכון המוצר "${productName}" לפי שם`);
+          }
           currentIndex++;
           setTimeout(addNextProduct, 500);
         });
@@ -753,6 +990,235 @@ if (window.location.href.includes('carrefour.co.il')) {
     
     // התחל את תהליך ההוספה
     setTimeout(addNextProduct, 500);
+  }
+  
+  // פונקציה לריקון העגלה הנוכחית
+  async function clearCart(cartData, existingItems) {
+    console.log('התחלת פונקציית clearCart:', {
+      hasItems: !!existingItems && existingItems.length > 0,
+      itemCount: existingItems?.length || 0,
+      hasCartData: !!cartData,
+      hasAuthToken: cartData ? !!cartData.carrefour_auth_token : false,
+      hasCartDetails: cartData ? !!cartData.carrefour_cart_details : false
+    });
+    
+    if (!existingItems || existingItems.length === 0) {
+      console.log('אין פריטים בעגלה לריקון');
+      return true;
+    }
+    
+    // וידוא שיש לנו את כל הנתונים הנדרשים
+    if (!cartData) {
+      console.error('לא התקבלו נתוני כרטיס לריקון העגלה');
+      return false;
+    }
+    
+    if (!cartData.carrefour_auth_token) {
+      console.error('חסר טוקן אימות (carrefour_auth_token) - נדרש לריקון העגלה');
+      return false;
+    }
+    
+    if (!cartData.carrefour_cart_details) {
+      console.error('חסרים פרטי עגלה (carrefour_cart_details) - נדרשים לריקון העגלה');
+      return false;
+    }
+    
+    try {
+      const authToken = cartData.carrefour_auth_token;
+      const cartDetails = cartData.carrefour_cart_details;
+      
+      console.log('נתוני עגלה וטוקן לריקון:', {
+        authTokenExists: !!authToken,
+        cartDetailsExists: !!cartDetails,
+        retailerId: cartDetails?.retailerId,
+        branchId: cartDetails?.branchId,
+        cartId: cartDetails?.cartId,
+        appId: cartDetails?.appId || 4
+      });
+      
+      // וידוא שיש לנו את כל הפרמטרים הנדרשים
+      if (!cartDetails.retailerId || !cartDetails.branchId || !cartDetails.cartId) {
+        console.error('חסרים פרטי עגלה חיוניים לביצוע בקשת ריקון:', cartDetails);
+        return false;
+      }
+      
+      // בניית URL לבקשה עם הפרמטרים המתאימים
+      const apiUrl = `https://www.carrefour.co.il/v2/retailers/${cartDetails.retailerId}/branches/${cartDetails.branchId}/carts/${cartDetails.cartId}?appId=${cartDetails.appId || 4}`;
+      
+      console.log('שולח בקשה לריקון העגלה אל:', apiUrl);
+      
+      // בניית מערך של פריטים עם דגל delete: true לריקון העגלה
+      const linesWithZeroQuantity = existingItems.map(item => ({
+        quantity: 0,
+        soldBy: null,
+        comments: "",
+        isCase: false,
+        metaData: null,
+        retailerProductId: parseInt(item.retailerProductId, 10),
+        type: 1
+      }));
+      
+      console.log(`מכין בקשת ריקון עבור ${linesWithZeroQuantity.length} פריטים`);
+      console.log('פרטי הבקשה לריקון:', linesWithZeroQuantity.map((item, index) => 
+        `פריט ${index+1}: retailerProductId=${item.retailerProductId}, quantity=${item.quantity}`
+      ));
+      
+      // בניית גוף הבקשה לריקון העגלה
+      const requestBody = {
+        lines: linesWithZeroQuantity,
+        source: "importCSV",
+        deliveryProduct_Id: 16388534,
+        deliveryType: 2
+      };
+      
+      console.log('גוף בקשת הריקון:', JSON.stringify(requestBody));
+      
+      // שליחת הבקשה
+      console.log('שולח בקשת API לריקון העגלה...');
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=UTF-8",
+          "Authorization": `Bearer ${authToken}`,
+          "Accept": "application/json, text/plain, */*",
+          "X-HTTP-Method-Override": "PATCH"
+        },
+        body: JSON.stringify(requestBody)
+      });
+      
+      console.log('התקבלה תשובה מהשרת לבקשת הריקון:', response.status, response.statusText);
+      
+      if (response.ok) {
+        console.log('העגלה רוקנה בהצלחה (כמות אופסה)');
+        try {
+          const responseData = await response.json();
+          console.log('תשובת ריקון העגלה:', responseData);
+          
+          // בדיקה האם יש עדיין פריטים בעגלה
+          let remainingItems = [];
+          if (responseData.cart && responseData.cart.lines) {
+            remainingItems = responseData.cart.lines.filter(line => 
+              line.quantity > 0 && !line.text.includes("איסוף עצמי"));
+          }
+          
+          // שלב 2: מחיקה מלאה של כל המוצרים שהיו בעגלה
+          console.log(`שלב 2: מוחק לגמרי את כל הפריטים (${existingItems.length}) שהיו בעגלה`);
+          
+          // המתנה קצרה לפני ניסיון מחיקת הפריטים
+          console.log('ממתין לפני מחיקת הפריטים מהעגלה...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // בניית מערך של פריטים עם דגל delete: true למחיקה מלאה מהעגלה
+          const linesToDelete = existingItems.map(item => ({
+            delete: true,
+            retailerProductId: parseInt(item.retailerProductId, 10),
+            isCase: false,
+            type: 1
+          }));
+          
+          console.log(`מכין בקשת מחיקה מלאה עבור ${linesToDelete.length} פריטים`);
+          console.log('פרטי הבקשה למחיקה מלאה:', 
+            linesToDelete.map((item, index) => 
+              `פריט ${index+1}: retailerProductId=${item.retailerProductId}, delete=${item.delete}`));
+          
+          // בניית גוף הבקשה למחיקת פריטים
+          const deleteRequestBody = {
+            lines: linesToDelete,
+            deliveryProduct_Id: 16388534,
+            deliveryType: 2
+          };
+          
+          console.log('גוף בקשת המחיקה המלאה:', JSON.stringify(deleteRequestBody));
+          
+          // שליחת הבקשה
+          console.log('שולח בקשת API למחיקה מלאה של הפריטים...');
+          const deleteResponse = await fetch(apiUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json;charset=UTF-8",
+              "Authorization": `Bearer ${authToken}`,
+              "Accept": "application/json, text/plain, */*",
+              "X-HTTP-Method-Override": "PATCH"
+            },
+            body: JSON.stringify(deleteRequestBody)
+          });
+          
+          console.log('התקבלה תשובה מהשרת לבקשת המחיקה המלאה:', deleteResponse.status, deleteResponse.statusText);
+          
+          if (deleteResponse.ok) {
+            console.log('כל הפריטים נמחקו לגמרי מהעגלה בהצלחה');
+            try {
+              const deleteResponseData = await deleteResponse.json();
+              console.log('תשובת מחיקת הפריטים:', deleteResponseData);
+              
+              // בדיקה אם יש עדיין פריטים בעגלה אחרי המחיקה המלאה
+              let itemsAfterDelete = [];
+              if (deleteResponseData.cart && deleteResponseData.cart.lines) {
+                itemsAfterDelete = deleteResponseData.cart.lines.filter(line => 
+                  !line.text.includes("איסוף עצמי"));
+              }
+              
+              if (itemsAfterDelete.length > 0) {
+                console.warn(`לאחר מחיקה מלאה עדיין יש ${itemsAfterDelete.length} פריטים בעגלה:`, 
+                  itemsAfterDelete.map(item => `${item.text} (ID: ${item.retailerProductId})`));
+              } else {
+                console.log('העגלה רוקנה לחלוטין, אין פריטים נותרים');
+              }
+            } catch (error) {
+              console.log('לא ניתן לפרסר את תשובת מחיקת הפריטים:', error);
+            }
+          } else {
+            console.error('שגיאה במחיקה מלאה של הפריטים:', deleteResponse.status);
+            try {
+              const errorText = await deleteResponse.text();
+              console.error('פרטי שגיאת המחיקה המלאה:', errorText);
+            } catch (error) {
+              console.error('לא ניתן לקרוא את פרטי שגיאת המחיקה המלאה');
+            }
+          }
+          
+          // בדיקה אם יש פריטים לא פעילים בעגלה שיש להסיר
+          let inactiveItems = [];
+          if (responseData.inactiveLines && responseData.inactiveLines.length > 0) {
+            inactiveItems = responseData.inactiveLines;
+            console.log(`נמצאו ${inactiveItems.length} פריטים לא פעילים בעגלה:`, 
+                      inactiveItems.map(item => `${item.text || 'פריט'} (ID: ${item.retailerProductId})`));
+            
+            // ניסיון להסיר את הפריטים הלא פעילים
+            const inactiveRemovalSuccess = await removeInactiveCartItems(cartData, inactiveItems);
+            
+            if (inactiveRemovalSuccess) {
+              console.log('הפריטים הלא פעילים הוסרו בהצלחה מהעגלה');
+            } else {
+              console.warn('לא הצלחנו להסיר את כל הפריטים הלא פעילים מהעגלה');
+            }
+          } else {
+            console.log('לא נמצאו פריטים לא פעילים נוספים בעגלה');
+          }
+          
+          // המתנה נוספת אחרי כל פעולות הריקון והמחיקה
+          console.log('ממתין אחרי סיום תהליך ריקון העגלה...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          return true;
+        } catch (error) {
+          console.log('לא ניתן לפרסר את תשובת ריקון העגלה:', error);
+          return false;
+        }
+      } else {
+        console.error('שגיאה בריקון העגלה:', response.status);
+        try {
+          const errorText = await response.text();
+          console.error('פרטי שגיאת ריקון:', errorText);
+        } catch (error) {
+          console.error('לא ניתן לקרוא את פרטי שגיאת הריקון');
+        }
+        return false;
+      }
+    } catch (error) {
+      console.error('שגיאה בתהליך ריקון העגלה:', error);
+      return false;
+    }
   }
   
   // פונקציה שמוסיפה מוצר לעגלה באמצעות קישור ישיר
@@ -1054,3 +1520,211 @@ function processCSV(csvText) {
   // התחלת תהליך הוספת המוצרים
   addNextProduct();
 } 
+
+// פונקציה להסרת פריטים לא פעילים מהעגלה
+async function removeInactiveCartItems(cartData, inactiveItems) {
+  if (!inactiveItems || inactiveItems.length === 0) {
+    console.log('אין פריטים לא פעילים להסרה מהעגלה');
+    return true;
+  }
+
+  console.log(`מסיר ${inactiveItems.length} פריטים לא פעילים מהעגלה:`, 
+    inactiveItems.map(item => `${item.text || item.name || 'פריט'} (ID: ${item.retailerProductId})`));
+
+  try {
+    if (!cartData || !cartData.carrefour_auth_token || !cartData.carrefour_cart_details) {
+      console.error('חסרים נתוני טוקן או עגלה להסרת פריטים לא פעילים');
+      return false;
+    }
+
+    const authToken = cartData.carrefour_auth_token;
+    const cartDetails = cartData.carrefour_cart_details;
+    
+    // וידוא שיש לנו את כל הפרמטרים הנדרשים
+    if (!cartDetails.retailerId || !cartDetails.branchId || !cartDetails.cartId) {
+      console.error('חסרים פרטי עגלה חיוניים להסרת פריטים לא פעילים:', cartDetails);
+      return false;
+    }
+    
+    // בניית URL לבקשה עם הפרמטרים המתאימים
+    const apiUrl = `https://www.carrefour.co.il/v2/retailers/${cartDetails.retailerId}/branches/${cartDetails.branchId}/carts/${cartDetails.cartId}?appId=${cartDetails.appId || 4}`;
+    
+    console.log('שולח בקשה להסרת פריטים לא פעילים מהעגלה אל:', apiUrl);
+    
+    // בניית מערך של פריטים עם דגל delete: true להסרה מלאה מהעגלה
+    const linesToDelete = inactiveItems.map(item => ({
+      delete: true,
+      retailerProductId: parseInt(item.retailerProductId, 10),
+      isCase: false,
+      type: 1
+    }));
+    
+    console.log(`מכין בקשת הסרה עבור ${linesToDelete.length} פריטים לא פעילים`);
+    console.log('פרטי הבקשה להסרת פריטים לא פעילים:', 
+                JSON.stringify(linesToDelete.map((item, index) => 
+                  `פריט ${index+1}: retailerProductId=${item.retailerProductId}, delete=${item.delete}`)));
+    
+    // בניית גוף הבקשה להסרת פריטים לא פעילים
+    const requestBody = {
+      lines: linesToDelete,
+      deliveryProduct_Id: 16388534,
+      deliveryType: 2
+    };
+    
+    console.log('גוף בקשת ההסרה:', JSON.stringify(requestBody));
+    
+    // שליחת הבקשה
+    console.log('שולח בקשת API להסרת פריטים לא פעילים...');
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json;charset=UTF-8",
+        "Authorization": `Bearer ${authToken}`,
+        "Accept": "application/json, text/plain, */*",
+        "X-HTTP-Method-Override": "PATCH"
+      },
+      body: JSON.stringify(requestBody)
+    });
+    
+    console.log('התקבלה תשובה מהשרת לבקשת הסרת פריטים לא פעילים:', response.status, response.statusText);
+    
+    if (response.ok) {
+      console.log('הפריטים הלא פעילים הוסרו בהצלחה מהעגלה');
+      try {
+        const responseData = await response.json();
+        console.log('תשובת הסרת פריטים לא פעילים:', responseData);
+        
+        // בדיקה האם יש עדיין פריטים לא פעילים בעגלה
+        if (responseData.inactiveLines && responseData.inactiveLines.length > 0) {
+          console.warn(`לאחר הסרת פריטים לא פעילים עדיין יש ${responseData.inactiveLines.length} פריטים לא פעילים בעגלה:`, 
+                       responseData.inactiveLines);
+        } else {
+          console.log('כל הפריטים הלא פעילים הוסרו בהצלחה מהעגלה');
+        }
+        
+        return true;
+      } catch (error) {
+        console.log('לא ניתן לפרסר את תשובת הסרת הפריטים הלא פעילים:', error);
+        return true; // עדיין נחשב כהצלחה
+      }
+    } else {
+      console.error('שגיאה בהסרת פריטים לא פעילים:', response.status);
+      try {
+        const errorText = await response.text();
+        console.error('פרטי שגיאת הסרת פריטים לא פעילים:', errorText);
+      } catch (error) {
+        console.error('לא ניתן לקרוא את פרטי שגיאת הסרת פריטים לא פעילים');
+      }
+      return false;
+    }
+  } catch (error) {
+    console.error('שגיאה בתהליך הסרת פריטים לא פעילים:', error);
+    return false;
+  }
+}
+
+// פונקציה לקבלת הפריטים הקיימים בעגלה
+async function getExistingCartItems(cartData) {
+  let existingCartItems = [];
+  
+  try {
+    // בדיקה אם יש לנו טוקן X-Auth
+    if (cartData.carrefour_token) {
+      console.log('מנסה לקבל פריטים קיימים באמצעות טוקן X-Auth');
+      const cartApiUrl = 'https://www.carrefour.co.il/api/v1/cart';
+      const cartResponse = await fetch(cartApiUrl, {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Auth-Token': cartData.carrefour_token
+        }
+      });
+      
+      console.log('סטטוס תשובה מה-API:', cartResponse.status, cartResponse.statusText);
+      
+      if (cartResponse.ok) {
+        const cartDataResponse = await cartResponse.json();
+        console.log('התקבלו נתוני עגלה מה-API:', cartDataResponse);
+        
+        if (cartDataResponse.items && cartDataResponse.items.length > 0) {
+          // שמירת הפריטים הקיימים עם מזהה וכמות
+          existingCartItems = cartDataResponse.items.map(item => ({
+            retailerProductId: String(item.product?.retailerProductId || item.product?.id || ''),
+            productId: String(item.product?.productId || item.product?.id || ''),
+            quantity: item.quantity || 1,
+            name: item.product?.name || ''
+          }));
+          
+          console.log(`נמצאו ${existingCartItems.length} פריטים קיימים בעגלה:`, 
+            existingCartItems.map(item => `${item.name} (ID: ${item.retailerProductId}, כמות: ${item.quantity})`));
+        } else {
+          console.log('העגלה הנוכחית ריקה (לפי API ראשי)');
+        }
+      } else {
+        console.error('שגיאה בקבלת נתוני עגלה מה-API הראשי:', cartResponse.status);
+      }
+    } else {
+      console.log('אין טוקן X-Auth זמין לקבלת נתוני עגלה - ננסה דרך API אחר');
+    }
+    
+    // אם לא הצלחנו לקבל פריטים דרך X-Auth או שאין לנו X-Auth, ננסה דרך API אחר
+    if (existingCartItems.length === 0 && cartData.carrefour_auth_token && cartData.carrefour_cart_details) {
+      console.log('מנסה לקבל פריטים קיימים באמצעות API אחר');
+      const cartDetails = cartData.carrefour_cart_details;
+      const apiUrl = `https://www.carrefour.co.il/v2/retailers/${cartDetails.retailerId}/branches/${cartDetails.branchId}/carts/${cartDetails.cartId}?appId=${cartDetails.appId || 4}`;
+      
+      console.log('שולח בקשה לקבלת פרטי העגלה מ-API אחר:', apiUrl);
+      
+      // שליחת בקשה לקבלת פרטי העגלה
+      const cartResponse = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json;charset=UTF-8",
+          "Authorization": `Bearer ${cartData.carrefour_auth_token}`,
+          "Accept": "application/json, text/plain, */*",
+          "X-HTTP-Method-Override": "PATCH"
+        },
+        body: JSON.stringify({})
+      });
+      
+      if (cartResponse.ok) {
+        const cartDataResponse = await cartResponse.json();
+        console.log('התקבלו פרטי עגלה מה-API האחר:', cartDataResponse);
+        
+        if (cartDataResponse.cart && cartDataResponse.cart.lines && cartDataResponse.cart.lines.length > 0) {
+          // שמירת הפריטים הקיימים
+          const cartLines = cartDataResponse.cart.lines.filter(line => 
+            !line.text.includes("איסוף עצמי") && line.quantity > 0);
+          
+          if (cartLines.length > 0) {
+            console.log(`נמצאו ${cartLines.length} פריטים בעגלה (API אחר):`);
+            
+            existingCartItems = cartLines.map(line => ({
+              retailerProductId: String(line.retailerProductId || line.product?.id || ''),
+              productId: String(line.productId || ''),
+              quantity: line.quantity || 1,
+              name: line.text || ''
+            }));
+            
+            console.log(`פריטים קיימים בעגלה (${existingCartItems.length}):`, 
+              existingCartItems.map(item => `${item.name} (ID: ${item.retailerProductId}, כמות: ${item.quantity})`));
+              
+            // הדפסת כל המזהים של הפריטים הקיימים לצורך ניפוי באגים
+            existingCartItems.forEach(item => {
+              console.log(`פריט: ${item.name}, retailerProductId: "${item.retailerProductId}" (${typeof item.retailerProductId}), productId: "${item.productId}" (${typeof item.productId})`);
+            });
+          } else {
+            console.log('לא נמצאו פריטים רלוונטיים בעגלה (API אחר)');
+          }
+        } else {
+          console.log('העגלה ריקה לפי ה-API השני');
+        }
+      } else {
+        console.error('שגיאה בקבלת נתוני עגלה מה-API האחר:', cartResponse.status);
+      }
+    }
+  } catch (error) {
+    console.error('שגיאה בקבלת פריטים קיימים בעגלה:', error);
+  }
+  
+  return existingCartItems;
+}
