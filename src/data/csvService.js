@@ -247,7 +247,7 @@ export function prepareImportData(parsedCsv) {
         }
         
         // וידוא שהכמות היא מספר חיובי
-        quantity = Math.max(1, Math.round(quantity));
+        quantity = quantity > 0 ? quantity : 0;
       }
     }
     
