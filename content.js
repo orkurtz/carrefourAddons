@@ -61,7 +61,7 @@ if (window.location.href.includes('carrefour.co.il')) {
   chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     console.log(`content.js (${scriptId}): התקבלה הודעה:`, request);
     debugElement.textContent = `התקבלה הודעה: ${request.action} (${new Date().toLocaleTimeString()})`;
-    debugElement.style.display = 'block'; // מציג את אלמנט הדיבאג בעת קבלת הודעה
+    debugElement.style.display = 'block';
     
     try {
       if (request.action === "exportCart") {
@@ -69,19 +69,21 @@ if (window.location.href.includes('carrefour.co.il')) {
         debugElement.textContent += ' - מתחיל ייצוא';
         
         // ייתכן שאנחנו לא בדף העגלה - נבדוק
+        /*
         if (!window.location.href.includes('/cart')) {
           console.log('לא נמצאים בדף העגלה, ננסה לעבור לדף העגלה תחילה');
           // נשמור את הפעולה באחסון מקומי ונעבור לדף העגלה
           chrome.storage.local.set({ 'carrefour_pending_action': 'export' }, function() {
-            window.location.href = 'https://www.carrefour.co.il/cart/';
+            window.location.href = 'https://www.carrefour.co.il/cart/summary';
             // לא נשלח תשובה מיד, כי אנחנו עוברים לדף אחר
             sendResponse({status: 'redirecting'});
           });
         } else {
+        */
           // אנחנו בדף העגלה, נבצע את הייצוא מיד
           exportCartToCsv();
           sendResponse({status: 'ok'});
-        }
+        //}
         return true;
       }
       else if (request.action === "importCart") {
