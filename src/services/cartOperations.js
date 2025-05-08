@@ -111,6 +111,7 @@ export async function importCart(csvData, mode = CONFIG.IMPORT_MODES.REPLACE) {
     // שלב 2: הוספת המוצרים החדשים
     let addedProducts = 0;
     let skippedProducts = 0;
+    let zeroQuantityProducts = 0;
     
     for (let i = 0; i < products.length; i++) {
       const product = products[i];
@@ -130,6 +131,17 @@ export async function importCart(csvData, mode = CONFIG.IMPORT_MODES.REPLACE) {
             `מעדכן כמות: ${product.name} (${existingItem.quantity} + ${product.quantity} = ${finalQuantity})`
           );
         }
+      }
+      
+      // בדיקה אם הכמות היא 0
+      if (finalQuantity <= 0) {
+        zeroQuantityProducts++;
+        progressDialog.updateProgress(
+          i, 
+          products.length, 
+          `דילוג על ${product.name} - כמות אפס או שלילית אינה חוקית`
+        );
+        continue;
       }
       
       // בחירת שיטת ההוספה הטובה ביותר בהתאם לנתונים הזמינים
@@ -208,10 +220,14 @@ export async function importCart(csvData, mode = CONFIG.IMPORT_MODES.REPLACE) {
     // סיכום תהליך הייבוא
     if (mode === CONFIG.IMPORT_MODES.ADD && skippedProducts > 0) {
       progressDialog.complete(
-        `הוספו ${addedProducts} מוצרים לעגלה, דולגו ${skippedProducts} מוצרים שכבר קיימים`
+        `הוספו ${addedProducts} מוצרים לעגלה, דולגו ${skippedProducts} מוצרים שכבר קיימים${zeroQuantityProducts > 0 ? `, ${zeroQuantityProducts} מוצרים עם כמות 0` : ''}`
       );
     } else {
-      progressDialog.complete(`ייבוא הושלם בהצלחה (${addedProducts}/${products.length} מוצרים)`);
+      let summaryMessage = `ייבוא הושלם בהצלחה (${addedProducts}/${products.length} מוצרים)`;
+      if (zeroQuantityProducts > 0) {
+        summaryMessage += `, דולגו ${zeroQuantityProducts} מוצרים עם כמות 0`;
+      }
+      progressDialog.complete(summaryMessage);
     }
     
     return true;

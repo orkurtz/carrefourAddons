@@ -289,6 +289,12 @@ export async function removeInactiveCartItems(inactiveItems) {
  */
 export async function addProductToCart(productId, quantity) {
   try {
+    // Validate quantity - don't proceed with Carrefour API call if quantity is 0
+    if (quantity <= 0) {
+      console.warn('לא ניתן להוסיף מוצר עם כמות 0 או שלילית');
+      return false;
+    }
+
     const cartData = await getCartData();
     
     if (!cartData[CONFIG.STORAGE_KEYS.AUTH_TOKEN] || !cartData[CONFIG.STORAGE_KEYS.CART_DETAILS]) {
