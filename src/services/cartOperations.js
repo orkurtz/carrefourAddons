@@ -29,6 +29,25 @@ export async function exportCart() {
       return false;
     }
     
+    // לוג מפורט של פריטי העגלה לצורכי דיבוג
+    console.log('===== פריטי העגלה לייצוא (דיבוג) =====');
+    console.table(cartItems);
+    console.log('פירוט מלא של כל פריט:');
+    cartItems.forEach((item, index) => {
+      console.log(`פריט ${index + 1}:`, {
+        שם: item.name,
+        כמות: item.quantity,
+        מחיר: item.price,
+        "סה״כ מחיר": item.totalPrice,
+        ברקוד: item.barcode,
+        "מזהה מוצר": item.productId,
+        "מזהה ספק": item.retailerProductId,
+        קישור: item.link,
+        "כל הנתונים": item
+      });
+    });
+    console.log('=========================================');
+    
     debug(`נמצאו ${cartItems.length} מוצרים בעגלה, מכין קובץ CSV`);
     
     // ייצוא המידע ל-CSV

@@ -73,20 +73,40 @@ export async function getCurrentCart() {
  * @returns {Array<Object>} מערך פריטי העגלה המעובדים
  */
 function processCartApiResponse(response) {
+  // לוג של התשובה המקורית מהAPI
+  console.log('===== תשובה מקורית מה-API הראשי =====', response);
+  
   if (!response.items || response.items.length === 0) {
     return [];
   }
   
-  return response.items.map(item => ({
-    name: item.product?.name || '',
-    barcode: item.product?.barcode || '',
-    quantity: item.quantity || 1,
-    price: item.product?.price || 0,
-    totalPrice: (item.quantity * item.product?.price) || 0,
-    link: `https://www.carrefour.co.il/product/${item.product?.id || ''}`,
-    productId: item.product?.productId || item.product?.id || '',
-    retailerProductId: item.product?.retailerProductId || item.product?.id || ''
-  }));
+  const processedItems = response.items.map(item => {
+    // Check for weighableProductUnits field to determine the quantity
+    let quantity;
+    if (item.weighableProductUnits !== undefined && item.weighableProductUnits !== null) {
+      quantity = item.weighableProductUnits;
+      console.log(`Using weighableProductUnits (${quantity}) instead of quantity (${item.quantity}) for product: ${item.product?.name}`);
+    } else {
+      quantity = item.quantity || 1;
+    }
+    
+    return {
+      name: item.product?.name || '',
+      barcode: item.product?.barcode || '',
+      quantity: quantity,
+      price: item.product?.price || 0,
+      totalPrice: (quantity * item.product?.price) || 0,
+      link: `https://www.carrefour.co.il/product/${item.product?.id || ''}`,
+      productId: item.product?.productId || item.product?.id || '',
+      retailerProductId: item.product?.retailerProductId || item.product?.id || ''
+    };
+  });
+  
+  // לוג של הפריטים לאחר עיבוד
+  console.log('===== פריטים לאחר עיבוד מה-API הראשי =====');
+  console.table(processedItems);
+  
+  return processedItems;
 }
 
 /**
@@ -95,22 +115,42 @@ function processCartApiResponse(response) {
  * @returns {Array<Object>} מערך פריטי העגלה המעובדים
  */
 function processCartV2ApiResponse(response) {
+  // לוג של התשובה המקורית מהAPI
+  console.log('===== תשובה מקורית מה-API המשני (V2) =====', response);
+  
   if (!response.cart || !response.cart.lines || response.cart.lines.length === 0) {
     return [];
   }
   
-  return response.cart.lines
+  const processedItems = response.cart.lines
     .filter(item => !item.text.includes("איסוף עצמי")) // דילוג על מוצרים לא רלוונטיים
-    .map(item => ({
-      name: item.text || '',
-      barcode: item.barcode || '',
-      quantity: item.quantity || 1,
-      price: item.unitPrice || 0,
-      totalPrice: item.totalPrice || 0,
-      link: `https://www.carrefour.co.il/?catalogProduct=${item.product?.productId || ''}`,
-      productId: item.product?.productId || '',
-      retailerProductId: item.product?.id || item.retailerProductId || ''
-    }));
+    .map(item => {
+      // Check for weighableProductUnits field to determine the quantity
+      let quantity;
+      if (item.weighableProductUnits !== undefined && item.weighableProductUnits !== null) {
+        quantity = item.weighableProductUnits;
+        console.log(`Using weighableProductUnits (${quantity}) instead of quantity (${item.quantity}) for product: ${item.text}`);
+      } else {
+        quantity = item.quantity || 1;
+      }
+      
+      return {
+        name: item.text || '',
+        barcode: item.barcode || '',
+        quantity: quantity,
+        price: item.unitPrice || 0,
+        totalPrice: item.totalPrice || 0,
+        link: `https://www.carrefour.co.il/?catalogProduct=${item.product?.productId || ''}`,
+        productId: item.product?.productId || '',
+        retailerProductId: item.product?.id || item.retailerProductId || ''
+      };
+    });
+  
+  // לוג של הפריטים לאחר עיבוד
+  console.log('===== פריטים לאחר עיבוד מה-API המשני (V2) =====');
+  console.table(processedItems);
+  
+  return processedItems;
 }
 
 /**

@@ -170,18 +170,32 @@ export function createProgressDialog(totalItems, mode = CONFIG.IMPORT_MODES.REPL
     textContent: 'סגור',
     style: {
       marginTop: '15px',
-      padding: '5px 10px',
-      backgroundColor: CONFIG.UI.STYLES.SECONDARY_COLOR,
+      padding: '8px 15px',
+      backgroundColor: '#2196F3', // כחול
+      color: 'white',
       border: 'none',
       borderRadius: '4px',
       cursor: 'pointer',
-      display: 'none' // יוצג רק בסיום
+      fontWeight: 'bold',
+      display: 'none', // יוצג רק בסיום
+      transition: 'background-color 0.3s'
     }
   });
   
-  // הוספת פונקציית סגירה לכפתור
+  // הוספת אפקט hover לכפתור
+  closeButton.addEventListener('mouseenter', function() {
+    this.style.backgroundColor = '#0b7dda'; // כחול כהה יותר
+  });
+  
+  closeButton.addEventListener('mouseleave', function() {
+    this.style.backgroundColor = '#2196F3'; // חזרה לכחול המקורי
+  });
+  
+  // הוספת פונקציית סגירה ורענון דף לכפתור
   closeButton.addEventListener('click', function() {
     document.body.removeChild(progressModal);
+    // רענון הדף
+    window.location.reload();
   });
   
   // הרכבת הדיאלוג
@@ -207,6 +221,14 @@ export function createProgressDialog(totalItems, mode = CONFIG.IMPORT_MODES.REPL
         CONFIG.UI.STYLES.ERROR_COLOR : 
         CONFIG.UI.STYLES.SUCCESS_COLOR;
       closeButton.style.display = 'block';
+      // שינוי צבע כפתור הסגירה בהתאם לסטטוס
+      closeButton.style.backgroundColor = isError ? '#f44336' : '#2196F3';
+      closeButton.addEventListener('mouseenter', function() {
+        this.style.backgroundColor = isError ? '#d32f2f' : '#0b7dda';
+      });
+      closeButton.addEventListener('mouseleave', function() {
+        this.style.backgroundColor = isError ? '#f44336' : '#2196F3';
+      });
     },
     close: function() {
       if (progressModal.parentNode) {
