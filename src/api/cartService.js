@@ -85,20 +85,21 @@ function processCartApiResponse(response) {
     let quantity;
     if (item.weighableProductUnits !== undefined && item.weighableProductUnits !== null) {
       quantity = item.weighableProductUnits;
-      console.log(`Using weighableProductUnits (${quantity}) instead of quantity (${item.quantity}) for product: ${item.product?.name}`);
+      console.log(`Using weighableProductUnits (${quantity}) instead of quantity (${item.quantity}) for product: ${item.product?.name || item.text}`);
     } else {
       quantity = item.quantity || 1;
     }
     
     return {
-      name: item.product?.name || '',
-      barcode: item.product?.barcode || '',
+      name: item.text || item.product?.names?.[1]?.long || item.product?.name || '',
+      barcode: item.barcode || '',
       quantity: quantity,
-      price: item.product?.price || 0,
-      totalPrice: (quantity * item.product?.price) || 0,
+      price: item.unitPrice || item.price || item.product?.price || 0,
+      actualPrice: item.actualPrice || 0,
+      totalPrice: item.totalPrice || 0,
       link: `https://www.carrefour.co.il/product/${item.product?.id || ''}`,
-      productId: item.product?.productId || item.product?.id || '',
-      retailerProductId: item.product?.retailerProductId || item.product?.id || ''
+      productId: item.product?.productId || '',
+      retailerProductId: item.retailerProductId || item.product?.id || ''
     };
   });
   
@@ -123,7 +124,7 @@ function processCartV2ApiResponse(response) {
   }
   
   const processedItems = response.cart.lines
-    .filter(item => !item.text.includes("איסוף עצמי")) // דילוג על מוצרים לא רלוונטיים
+    .filter(item => !item.text?.includes("איסוף עצמי")) // דילוג על מוצרים לא רלוונטיים
     .map(item => {
       // Check for weighableProductUnits field to determine the quantity
       let quantity;
@@ -135,14 +136,15 @@ function processCartV2ApiResponse(response) {
       }
       
       return {
-        name: item.text || '',
+        name: item.text || item.product?.names?.[1]?.long || '',
         barcode: item.barcode || '',
         quantity: quantity,
-        price: item.unitPrice || 0,
+        price: item.unitPrice || item.price || 0,
+        actualPrice: item.actualPrice || 0,
         totalPrice: item.totalPrice || 0,
         link: `https://www.carrefour.co.il/?catalogProduct=${item.product?.productId || ''}`,
         productId: item.product?.productId || '',
-        retailerProductId: item.product?.id || item.retailerProductId || ''
+        retailerProductId: item.retailerProductId || item.product?.id || ''
       };
     });
   

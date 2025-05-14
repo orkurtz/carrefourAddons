@@ -120,6 +120,26 @@ function findColumnIndices(headers) {
     retailerProductIdIndex: -1
   };
   
+  console.log('DEBUG כותרות CSV שהתקבלו:', headers);
+  
+  // בדיקה ידנית ישירה למציאת מזהים בכותרות
+  headers.forEach((header, index) => {
+    const headerLower = header.toLowerCase().trim();
+    // חיפוש מדויק עבור productId
+    if (headerLower === 'productid' || headerLower.includes('product') && headerLower.includes('id')) {
+      console.log(`DEBUG מצאתי productId בעמודה ${index}: ${header}`);
+      indices.productIdIndex = index;
+    }
+    
+    // חיפוש מדויק עבור retailerProductId (וכולל שגיאות נפוצות)
+    if (headerLower === 'retailerproductid' || 
+        headerLower.includes('retailer') && headerLower.includes('product') && headerLower.includes('id') ||
+        headerLower.includes('retailerpro')) {
+      console.log(`DEBUG מצאתי retailerProductId בעמודה ${index}: ${header}`);
+      indices.retailerProductIdIndex = index;
+    }
+  });
+  
   headers.forEach((header, index) => {
     const normalizedHeader = header.toLowerCase().trim();
     
@@ -139,13 +159,13 @@ function findColumnIndices(headers) {
     else if (CONFIG.CSV.EXPECTED_HEADERS.LINK.some(h => normalizedHeader === h || normalizedHeader.includes(h))) {
       indices.linkIndex = index;
     } 
-    // בדיקת מזהה מוצר
-    else if (CONFIG.CSV.EXPECTED_HEADERS.PRODUCT_ID.some(h => normalizedHeader === h || 
+    // בדיקת מזהה מוצר (אם לא נמצא בבדיקה הקודמת)
+    else if (indices.productIdIndex === -1 && CONFIG.CSV.EXPECTED_HEADERS.PRODUCT_ID.some(h => normalizedHeader === h || 
              (normalizedHeader.includes('product') && normalizedHeader.includes('id')))) {
       indices.productIdIndex = index;
     } 
-    // בדיקת מזהה ספק
-    else if (CONFIG.CSV.EXPECTED_HEADERS.RETAILER_PRODUCT_ID.some(h => normalizedHeader === h || 
+    // בדיקת מזהה ספק (אם לא נמצא בבדיקה הקודמת)
+    else if (indices.retailerProductIdIndex === -1 && CONFIG.CSV.EXPECTED_HEADERS.RETAILER_PRODUCT_ID.some(h => normalizedHeader === h || 
              (normalizedHeader.includes('retailer') && normalizedHeader.includes('id')))) {
       indices.retailerProductIdIndex = index;
     }
@@ -166,6 +186,9 @@ function findColumnIndices(headers) {
       }
     }
   }
+  
+  // לוג סיכום של העמודות שנמצאו
+  console.log('DEBUG מיקומי עמודות שזוהו:', indices);
   
   return indices;
 }

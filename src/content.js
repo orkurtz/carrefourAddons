@@ -10,6 +10,26 @@ import { createDebugElement, registerKeyboardShortcuts } from './ui/uiComponents
 import { exportCart, importCart } from './services/cartOperations';
 import { debug, sleep } from './utils/helpers';
 
+// חסימת הודעות קונסול מסוימות
+(function blockConsoleMessages() {
+  // מחרוזת שנרצה לחסום
+  const messageToBlock = 'ניתן לבחור את זמן המשלוח בשלב סיום הקניה';
+  
+  // שמירת פונקציית הקונסול המקורית
+  const originalConsoleLog = console.log;
+  
+  // דריסת פונקציית console.log
+  console.log = function(...args) {
+    // המרת הארגומנטים למחרוזת לצורך חיפוש
+    const message = String(args);
+    
+    // אם ההודעה מכילה את המחרוזת לחסימה, לא נציג אותה
+    if (!message.includes(messageToBlock)) {
+      originalConsoleLog.apply(console, args);
+    }
+  };
+})();
+
 // וידוא שאנחנו באתר Carrefour
 if (window.location.href.includes('carrefour.co.il')) {
   // יצירת מזהה חד ערכי למופע הנוכחי של הסקריפט

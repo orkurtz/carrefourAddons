@@ -1,0 +1,4 @@
+-discount price should replac the total price in the csv (taking the actualPrice field and comapre it with totalPrice field - take the lower to the csv)
+nned to modify the cart service to bring this field from the api and than do the changes
+
+- in add to existing cart - we should search the product by product id or retialer ID and not by name (duplicate name appear) and make sure it work

@@ -29,15 +29,31 @@ export async function exportCart() {
       return false;
     }
     
+    // מעבר על כל הפריטים ועדכון מחיר סופי לפי הנמוך מבין actualPrice ו-totalPrice
+    const processedCartItems = cartItems.map(item => {
+      // העתקת כל השדות מהפריט המקורי
+      const processedItem = { ...item };
+      
+      // אם קיים מחיר מבצע (actualPrice) ששונה מ-0, נבדוק אם הוא נמוך יותר מהמחיר הרגיל
+      if (item.actualPrice && item.actualPrice > 0 && item.totalPrice > 0) {
+        // בחירת המחיר הנמוך מבין השניים
+        processedItem.totalPrice = Math.min(item.actualPrice, item.totalPrice);
+        console.log(`מוצר ${item.name}: המחיר הנמוך ביותר נבחר - ${processedItem.totalPrice} (רגיל: ${item.totalPrice}, מבצע: ${item.actualPrice})`);
+      }
+      
+      return processedItem;
+    });
+    
     // לוג מפורט של פריטי העגלה לצורכי דיבוג
     console.log('===== פריטי העגלה לייצוא (דיבוג) =====');
-    console.table(cartItems);
+    console.table(processedCartItems);
     console.log('פירוט מלא של כל פריט:');
-    cartItems.forEach((item, index) => {
+    processedCartItems.forEach((item, index) => {
       console.log(`פריט ${index + 1}:`, {
         שם: item.name,
         כמות: item.quantity,
         מחיר: item.price,
+        "מחיר מבצע": item.actualPrice,
         "סה״כ מחיר": item.totalPrice,
         ברקוד: item.barcode,
         "מזהה מוצר": item.productId,
@@ -48,10 +64,10 @@ export async function exportCart() {
     });
     console.log('=========================================');
     
-    debug(`נמצאו ${cartItems.length} מוצרים בעגלה, מכין קובץ CSV`);
+    debug(`נמצאו ${processedCartItems.length} מוצרים בעגלה, מכין קובץ CSV`);
     
     // ייצוא המידע ל-CSV
-    await csvService.exportToCsv(cartItems);
+    await csvService.exportToCsv(processedCartItems);
     
     debug('קובץ CSV הורד בהצלחה');
     
@@ -285,34 +301,59 @@ export async function importCart(csvData, mode = CONFIG.IMPORT_MODES.REPLACE) {
  * @returns {Object|null} המוצר שנמצא או null אם לא נמצא
  */
 function findExistingCartItem(existingItems, product) {
-  // חיפוש לפי מזהה ספק
-  if (product.retailerProductId) {
-    const byRetailerId = existingItems.find(item => 
-      item.retailerProductId === product.retailerProductId || 
-      item.retailerProductId === String(product.retailerProductId) || 
-      String(item.retailerProductId) === product.retailerProductId
-    );
+  // לוג לבדיקה - הדפסת המוצר הנכנס
+  console.log('DEBUG findExistingCartItem - מוצר נכנס:', product);
+  console.log('DEBUG retailerProductId:', product.retailerProductId, 'סוג:', typeof product.retailerProductId);
+  console.log('DEBUG productId:', product.productId, 'סוג:', typeof product.productId);
+  
+  // וידוא שהמזהים קיימים ולא ריקים
+  const hasRetailerId = product.retailerProductId && String(product.retailerProductId).trim() !== '' && product.retailerProductId !== '0';
+  const hasProductId = product.productId && String(product.productId).trim() !== '' && product.productId !== '0';
+  
+  // חיפוש לפי מזהה ספק - השיטה המועדפת והמדויקת ביותר
+  if (hasRetailerId) {
+    console.log('DEBUG תנאי retailerProductId מתקיים:', !!product.retailerProductId);
+    const retailerIdStr = String(product.retailerProductId).trim();
     
-    if (byRetailerId) return byRetailerId;
+    const byRetailerId = existingItems.find(item => {
+      const itemIdStr = String(item.retailerProductId || '').trim();
+      return itemIdStr === retailerIdStr;
+    });
+    
+    if (byRetailerId) {
+      console.log(`מוצר נמצא לפי מזהה ספק: ${product.name} (${product.retailerProductId})`);
+      return byRetailerId;
+    }
   }
   
-  // חיפוש לפי מזהה מוצר
-  if (product.productId) {
-    const byProductId = existingItems.find(item => 
-      item.productId === product.productId || 
-      item.productId === String(product.productId) || 
-      String(item.productId) === product.productId
-    );
+  // חיפוש לפי מזהה מוצר - שיטה מדויקת שנייה בחשיבותה
+  if (hasProductId) {
+    console.log('DEBUG תנאי productId מתקיים:', !!product.productId);
+    const productIdStr = String(product.productId).trim();
     
-    if (byProductId) return byProductId;
+    const byProductId = existingItems.find(item => {
+      const itemIdStr = String(item.productId || '').trim();
+      return itemIdStr === productIdStr;
+    });
+    
+    if (byProductId) {
+      console.log(`מוצר נמצא לפי מזהה מוצר: ${product.name} (${product.productId})`);
+      return byProductId;
+    }
   }
   
-  // חיפוש לפי שם מוצר בדיוק
+  // חיפוש לפי שם מוצר רק כמוצא אחרון
+  // שימוש בשם לא מומלץ מכיוון שיכולים להיות מוצרים שונים בעלי אותו שם
   if (product.name) {
+    console.log(`מנסה למצוא מוצר לפי שם (לא מומלץ): ${product.name}`);
     const byName = existingItems.find(item => item.name === product.name);
-    if (byName) return byName;
+    if (byName) {
+      console.log(`מוצר נמצא לפי שם: ${product.name}`);
+      return byName;
+    }
   }
   
+  console.log(`לא נמצא מוצר קיים בעגלה התואם ל: ${product.name}`);
   return null;
 }
 
